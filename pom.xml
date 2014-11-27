@@ -4,15 +4,15 @@
 
 	<groupId>tr.com.srdc</groupId>
     <artifactId>ontmalizer</artifactId>
-	<version>1.0.0</version>
+	<version>1.0.2</version>
     <packaging>jar</packaging>
     <name>Ontology Normalizer</name>
 	<description>Automatic lifting from XSD and XML to RDF/OWL ontologies.</description>
 	
 	<properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-		<maven.compiler.target>1.7</maven.compiler.target>
-		<maven.compiler.source>1.7</maven.compiler.source>
+		<maven.compiler.target>1.6</maven.compiler.target>
+		<maven.compiler.source>1.6</maven.compiler.source>
     </properties>
 	
     <dependencies>

@@ -1,17 +1,22 @@
 package tr.com.srdc.ontmalizer;
 
 import java.io.File;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.Iterator;
 
+import org.xml.sax.InputSource;
+
+import tr.com.srdc.ontmalizer.helper.AnnotationFactory;
 import tr.com.srdc.ontmalizer.helper.Constants;
 import tr.com.srdc.ontmalizer.helper.NamingUtil;
 import tr.com.srdc.ontmalizer.helper.SimpleTypeRestriction;
+import tr.com.srdc.ontmalizer.helper.URLResolver;
 import tr.com.srdc.ontmalizer.helper.XSDUtil;
-
 
 import com.hp.hpl.jena.datatypes.xsd.XSDDatatype;
 import com.hp.hpl.jena.ontology.EnumeratedClass;
@@ -84,15 +89,60 @@ public class XSD2OWLMapper {
 	public XSD2OWLMapper(File xsdFile) {
 		parseXSD(xsdFile);
 		initOntology();
-		
-		abstractClasses = new ArrayList<OntClass>();
-		mixedClasses = new ArrayList<OntClass>();
+	}
+	
+	/**
+	 * Creates a new XSD2OWLMapper instance. 
+	 * @param xsdInputStream
+	 * - An XML Schema InputStream to be converted
+	 */
+	public XSD2OWLMapper(InputStream xsdInputStream) {
+		parseXSD(xsdInputStream);
+		initOntology();
+	}
+	
+	/**
+	 * Creates a new XSD2OWLMapper instance. 
+	 * @param xsdInputStream
+	 * - An XML Schema URL to be converted
+	 */
+	public XSD2OWLMapper(URL xsdURL) {
+		parseXSD(xsdURL);
+		initOntology();
 	}
 	
 	private void parseXSD(File file) {
 		try {
 			XSOMParser parser = new XSOMParser();
+			parser.setAnnotationParser(new AnnotationFactory());
 			parser.parse(file);
+			schemaSet = parser.getResult();
+			schema = schemaSet.getSchema(1);
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+	
+	private void parseXSD(InputStream is) {
+		try {
+			XSOMParser parser = new XSOMParser();
+			parser.setAnnotationParser(new AnnotationFactory());
+			parser.parse(is);
+			schemaSet = parser.getResult();
+			schema = schemaSet.getSchema(1);
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+	
+	private void parseXSD(URL url) {
+		try {
+			XSOMParser parser = new XSOMParser();
+			parser.setAnnotationParser(new AnnotationFactory());
+			parser.setEntityResolver(new URLResolver());
+			InputSource inputSource = new InputSource(url.openStream());
+			inputSource.setSystemId(url.toExternalForm());
+			parser.parse(inputSource);
 			schemaSet = parser.getResult();
 			schema = schemaSet.getSchema(1);
 		} catch (Exception e) {
@@ -117,6 +167,9 @@ public class XSD2OWLMapper {
 		ontology.setNsPrefix("", mainURI + "#");
 		
 		hasValue = ontology.createProperty(Constants.ONTMALIZER_VALUE_PROP_NAME);
+		
+		abstractClasses = new ArrayList<OntClass>();
+		mixedClasses = new ArrayList<OntClass>();
 	}
 	
 	/**
@@ -152,7 +205,7 @@ public class XSD2OWLMapper {
 	private OntClass convertSimpleType(XSSimpleType simple, String parentURI) {
 		String NS 	= simple.getTargetNamespace() + "#";
 		String URI 	= getURI(simple);
-
+		
 		if (simple.isGlobal()) {
 			// TODO: Mustafa: Why would we define new simple types in the XSD namespace?
 			// The following if should not evaluate to true...
@@ -176,6 +229,7 @@ public class XSD2OWLMapper {
 				eqDataType.addProperty(OWL2.onDatatype, xsdResource);
 				dataType.addEquivalentClass(eqDataType);
 				
+				addTextAnnotation(simple, dataType);
 				return dataType;
 			}
 			else if (parentURI!=null) {
@@ -217,6 +271,7 @@ public class XSD2OWLMapper {
 					}
 				}
 				
+				addTextAnnotation(simple, datatype);
 				return datatype;
 			}
 			else if (simple.isList() || simple.isUnion()) {
@@ -287,6 +342,7 @@ public class XSD2OWLMapper {
 		for ( int i=0, length=facets.enumeration.length ; i<length ; i++ ) {
 			String memberURI = enumClass.getURI() + "_" 
 					   + facets.enumeration[i].replace('%', '_')
+										   	  .replace(' ', '_')
 										   	  .replace('[', '_')
 										   	  .replace(']', '_');
 			// If there are other characters that are not allowed, replace methods can be added.
@@ -297,6 +353,7 @@ public class XSD2OWLMapper {
 			
 			enumResource.addProperty(hasValue, oneOf);
 		}
+		addTextAnnotation(simple, enumClass);
 		return enumClass;
 	}
 	
@@ -347,8 +404,10 @@ public class XSD2OWLMapper {
 										   simple, 
 									       facets );
 			}
-			else 
+			else {
+				addTextAnnotation(simple, datatype);
 				return datatype;
+			}
 
 	}
 	
@@ -361,6 +420,7 @@ public class XSD2OWLMapper {
 				OntClass element = ontology.createClass(parentURI);
 				element.addSuperClass(complexClass);
 				
+				addTextAnnotation(complex, complexClass);
 				return complexClass;
 			}
 		}
@@ -466,6 +526,7 @@ public class XSD2OWLMapper {
 		if (complex.isAbstract())
 			abstractClasses.add(complexClass);
 		
+		addTextAnnotation(complex, complexClass);
 		return complexClass;
 	}
 	
@@ -662,6 +723,13 @@ public class XSD2OWLMapper {
 		for(OntClass mixedClass: mixedClasses) {
 			ontology.createAllValuesFromRestriction(null, prop, XSD.xstring).addSubClass(mixedClass);
 			ontology.createMaxCardinalityRestriction(null, prop, 1).addSubClass(mixedClass);
+		}
+	}
+	
+	private void addTextAnnotation(XSType xsType, OntClass ontClass) {
+		if(xsType.getAnnotation() != null && xsType.getAnnotation().getAnnotation() != null) {
+			String textAnnotation = xsType.getAnnotation().getAnnotation().toString();
+			ontClass.addProperty(RDFS.comment, textAnnotation);
 		}
 	}
 	
